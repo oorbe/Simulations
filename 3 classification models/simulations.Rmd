@@ -1,0 +1,534 @@
+---
+title: "Untitled"
+author: "Oliver Rodriguez"
+date: "28/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+library(tidyverse)
+library(gamlss)
+library(tree)
+library(gbm)
+crabs <- read.table(file = 'crabs.txt', header = T, sep = ''); crabs
+```
+
+Definiendo su distribucion:
+```{r}
+# Recordar cambiar el tamañño de la muestra : )
+str(crabs)
+# Distribución de y
+mean(crabs$y)
+rbinom(n = 100, size = 1 ,prob = 0.6416185)
+hist(rbinom(n = 10000, size = 1 ,prob = 0.6416185))
+
+
+y <- fitDist(crabs$y, type = 'binom')
+summary(y)
+y$mu
+x1 <- fitDist(crabs$width, type = 'realAll')
+x1$mu.coefficients
+x1$sigma.coefficients
+summary(x1)
+x1$fits
+x2 <- fitDist(crabs$width, type = 'realline')
+summary(x2)
+
+# Alguno histogramas y sus densidades estimadas:
+
+# la inversa de la gamma no parece ajustr, pero cuando aexponencie los parametros estimados entonces sí
+hist(crabs$width, freq = F); lines(density((rIGAMMA(n = 10000, mu =  exp(3.25690457), sigma = exp(-2.53285182)))))
+
+# No parece ajustarce muy bien
+rand_SN1 <- density(rSN1(1000, mu = 24.39, sigma = (1.045), nu = (1.567)))
+hist(crabs$width, freq = F); lines(rand_SN1)
+
+# Buena
+hist(crabs$width, freq = F); lines(density((rIGAMMA(n = 10000, mu =  exp(3.25690457), sigma = exp(-2.53285182)))))
+
+# Pasable
+fitdistr(crabs$width, densfun = 'gamma')
+hist(crabs$width, freq = F); lines(density(rgamma(n = 10000,shape = 155.4873439, rate = 5.9123269 )))
+ 
+# Mala
+fitdistr(crabs$width, densfun = 'weibull')
+hist(crabs$width, freq = F); lines(density(rweibull(n = 10000, shape =  12.3232810, scale = 27.2873515 )))
+
+# Nada muy mala
+fitdistr(crabs$width, densfun = 'exponential')
+hist(crabs$width, freq = F); lines(density(rexp(n = 10000, rate = 0.038024485)))
+
+# Pasable
+fitdistr(crabs$width, densfun = 'lognormal')
+hist(crabs$width, freq = F); lines(density(rlnorm(n = 10000,meanlog = 3.266352269, sdlog = 0.079567159  )))
+
+
+# distribucion de width
+shapiro.test(crabs$width)
+fitdistr(crabs$width, densfun = 'normal')
+# para la normal
+mean(crabs$width)
+sd(crabs$width)
+hist(crabs$width, freq = F); lines(density(rnorm(n = 10000, mean = 26.29884, sd = 2.109061 )))
+```
+
+distribuciones candidatas para los escenarios:
+```{r}
+# la inversa de la gamma no parece ajustr, pero cuando aexponencie los parametros estimados entonces sí
+hist(crabs$width, freq = F, xlab = 'Ancho de caparazon en cm', main = 'Densidad asumiendo distribución Gamma Inversa', col = 'forestgreen'); lines(density((rIGAMMA(n = 10000, mu =  exp(3.25690457), sigma = exp(-2.53285182)))), lwd = 3, col = 'firebrick') ;
+
+# para la normal
+hist(crabs$width, freq = F, xlab = 'Ancho de caparazon en cm', main = 'Densidad asumiendo distribución normal', col = 'forestgreen'); lines(density(rnorm(n = 10000, mean = 26.29884, sd = 2.109061 )), lwd = 3, col = 'firebrick')
+
+fitdistr(crabs$width, densfun = 'lognormal')
+hist(crabs$width, freq = F, xlab = 'Ancho de caparazon en cm', main = 'Densidad asumiendo distribución lognormal', col = 'forestgreen'); lines(density(rlnorm(n = 10000,meanlog = 3.266352269, sdlog = 0.079567159  )), lwd = 3, col = 'firebrick')
+
+fitdistr(crabs$width, densfun = 'gamma')
+hist(crabs$width, freq = F, xlab = 'Ancho de caparazon en cm', main = 'Densidad asumiendo distribución Gamma', col = 'forestgreen'); lines(density(rgamma(n = 10000,shape = 155.4873439, rate = 5.9123269 )), lwd = 3, col = 'firebrick')
+
+# para la normal
+hist(crabs$width, freq = F); lines(density(rnorm(n = 10000, mean = 20, sd = 2.109061 )))
+
+# para la normal
+hist(crabs$width, freq = F); lines(density(rnorm(n = 10000, mean = 30, sd = 2.109061 )))
+
+```
+
+Model from agresti pg 103
+Simulacion por escenarios pag 171 ISLR
+
+Aquí el mimo modelo que esta en agresti.
+```{r}
+# nivel de referencia es 1 tiene satellite
+contrasts(as.factor(crabs$y))
+fit <- glm(as.factor(y) ~ width, family=binomial, data=crabs) ; summary(fit)
+# The type = "response" option tells R to output probabilities of the form P(Y = 1|X). i.e:
+# Here, we let Y indicate whether a female crab has any
+# satellites (other males who could mate with her). That is, Y = 1 if a female crab has
+# at least one satellite, and Y = 0 if she has no satellite
+n <- 200
+samp_width <- rnorm(n = n, mean = 26.29884, sd = 2.109061) 
+prob_satellite <- predict(fit, newdata = data.frame(width = samp_width), type = 'response');
+y <- rbinom(n = n, size = 1, prob = prob_satellite)
+set.seed(4092021)
+index <- sample(x = n, size = 0.7*n, replace = F)
+datos_simulados <- data.frame(y, samp_width)
+head(datos_simulados)
+```
+
+
+
+# Pruebas de algunos modelos:
+logistico
+```{r, eval=F}
+mod_train <- glm(factor(y) ~ samp_width, family = binomial, data = datos_simulados[index,]) ; 
+prob_sim <- predict(object = mod_train, newdata = datos_simulados[-index,], type = 'response')
+estim <- ifelse(prob_sim > 0.5, 1, 0)# umbral de 0.5
+mean(estim == datos_simulados[-index,'y'])
+```
+arbol de clasificación
+```{r, eval=F}
+library(tree)
+mod_train_tree <- tree(factor(y) ~ samp_width, data = datos_simulados[index,]) 
+prob_sim <- predict(object = mod_train_tree, newdata = datos_simulados[-index,], type = 'class')
+mean(prob_sim == datos_simulados[-index,'y'])
+```
+
+Modelo de ensamble boosting
+```{r, eval=F}
+library(gbm)
+mod_train_boost <- gbm(y ~ samp_width, data = datos_simulados[index, ], distribution = 'adaboost', 
+                      n.trees = 5000, interaction.depth = 5) 
+prob_sim <- predict(object = mod_train_boost, newdata = datos_simulados[-index,], n.trees = 5000, type = 'response')
+prob_sim <- ifelse(prob_sim > 0.5, 1, 0)# umbral de 0.5
+mean(prob_sim == datos_simulados[-index,'y'])
+```
+
+
+
+# Borradores para raelizar los escenarios:
+
+#------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------
+```{r, eval=FALSE}
+n <- 100
+samp_width <-  rIGAMMA(n = 100, mu = exp(3.25690457), sigma = exp(-2.53285182))
+prob_satellite <- predict(fit, newdata = data.frame(width = samp_width), type = 'response');
+y <- rbinom(n = n, size = 1, prob = prob_satellite)
+index <- sample(x = n, size = 0.5*n, replace = F)
+datos_simulados <- data.frame(y, samp_width)
+
+Accurracy_mods <- numeric(3)
+
+mod_train <- glm(factor(y) ~ samp_width, family = binomial, data = datos_simulados[index,]) 
+prob_sim <- predict(object = mod_train, newdata = datos_simulados[-index,], type = 'response')
+estim <- ifelse(prob_sim > 0.5, 1, 0)# umbral de 0.5
+Accurracy_mods[1] <- mean(estim == datos_simulados[-index,'y'])
+
+index <- sample(x = n, size = 0.5*n, replace = F)
+mod_train_tree <- tree(factor(y) ~ samp_width, data = datos_simulados[index,]) 
+prob_sim <- predict(object = mod_train_tree, newdata = datos_simulados[-index,], type = 'class')
+Accurracy_mods[2] <- mean(estim == datos_simulados[-index,'y'])
+
+index <- sample(x = n, size = 0.5*n, replace = F)
+mod_train_boost <- gbm(factor(y) ~ samp_width, data = datos_simulados[index, ], distribution = 'adaboost', 
+                      n.trees = 5000, interaction.depth = 4) 
+prob_sim <- predict(object = mod_train_boost, newdata = datos_simulados[-index,], n.trees = 5000)
+Accurracy_mods[3] <- mean(estim == datos_simulados[-index,'y'])
+
+Accurracy_mods
+```
+
+```{r, eval=FALSE}
+n <- 100
+samp_width <-  rIGAMMA(n = 100, mu = exp(3.25690457), sigma = exp(-2.53285182))
+prob_satellite <- predict(fit, newdata = data.frame(width = samp_width), type = 'response');
+y <- rbinom(n = n, size = 1, prob = prob_satellite)
+index <- sample(x = n, size = 0.5*n, replace = F)
+datos_simulados <- data.frame(y, samp_width)
+
+Accurracy_mods <- numeric(3)
+
+mod_train <- glm(factor(y) ~ samp_width, family = binomial, data = datos_simulados[index,]) 
+prob_sim <- predict(object = mod_train, newdata = datos_simulados[-index,], type = 'response')
+estim <- ifelse(prob_sim > 0.5, 1, 0)# umbral de 0.5
+Accurracy_mods[1] <- mean(estim == datos_simulados[-index,'y'])
+
+
+samp_width <-  rIGAMMA(n = 100, mu = exp(3.25690457), sigma = exp(-2.53285182))
+prob_satellite <- predict(fit, newdata = data.frame(width = samp_width), type = 'response');
+y <- rbinom(n = n, size = 1, prob = prob_satellite)
+datos_simulados <- data.frame(y, samp_width)
+
+mod_train_tree <- tree(factor(y) ~ samp_width, data = datos_simulados[index,]) 
+prob_sim <- predict(object = mod_train_tree, newdata = datos_simulados[-index,], type = 'class')
+Accurracy_mods[2] <- mean(estim == datos_simulados[-index,'y'])
+
+samp_width <-  rIGAMMA(n = 100, mu = exp(3.25690457), sigma = exp(-2.53285182))
+prob_satellite <- predict(fit, newdata = data.frame(width = samp_width), type = 'response');
+y <- rbinom(n = n, size = 1, prob = prob_satellite)
+datos_simulados <- data.frame(y, samp_width)
+
+mod_train_boost <- gbm(factor(y) ~ samp_width, data = datos_simulados[index, ], distribution = 'adaboost', 
+                      n.trees = 5000, interaction.depth = 4) 
+prob_sim <- predict(object = mod_train_boost, newdata = datos_simulados[-index,], n.trees = 5000)
+Accurracy_mods[3] <- mean(estim == datos_simulados[-index,'y'])
+
+Accurracy_mods
+```
+
+```{r, eval=F}
+sim <- function(n = 100) {
+  n <- n
+  samp_width <-  rIGAMMA(n = n, mu = exp(3.25690457), sigma = exp(-2.53285182))
+  prob_satellite <- predict(fit, newdata = data.frame(width = samp_width), type = 'response');
+  y <- rbinom(n = n, size = 1, prob = prob_satellite)
+  index <- sample(x = n, size = 0.5*n, replace = F)
+  datos_simulados <- data.frame(y, samp_width)
+  
+  Accurracy_mods <- numeric(3)
+  
+  mod_train <- glm(factor(y) ~ samp_width, family = binomial, data = datos_simulados[index,]) 
+  prob_sim <- predict(object = mod_train, newdata = datos_simulados[-index,], type = 'response')
+  estim <- ifelse(prob_sim > 0.5, 1, 0)# umbral de 0.5
+  Accurracy_mods[1] <- mean(estim == datos_simulados[-index,'y'])
+  
+  index <- sample(x = n, size = 0.5*n, replace = F)
+  mod_train_tree <- tree(factor(y) ~ samp_width, data = datos_simulados[index,]) 
+  prob_sim <- predict(object = mod_train_tree, newdata = datos_simulados[-index,], type = 'class')
+  Accurracy_mods[2] <- mean(estim == datos_simulados[-index,'y'])
+  
+  index <- sample(x = n, size = 0.5*n, replace = F)
+  mod_train_boost <- gbm(factor(y) ~ samp_width, data = datos_simulados[index, ], distribution = 'adaboost', 
+                        n.trees = 5000, interaction.depth = 4) 
+  prob_sim <- predict(object = mod_train_boost, newdata = datos_simulados[-index,], n.trees = 5000)
+  Accurracy_mods[3] <- mean(estim == datos_simulados[-index,'y'])
+  
+  return(Accurracy_mods)
+}
+
+```
+
+```{r, eval=F}
+sapply(100, sim)
+sapply(seq(100, 500, by = 50), sim)
+
+rep(1, 2)
+l <- lapply(X = seq(100, 2000, by= 50), function(x)  sapply(rep(x, 10), sim))
+lapply(X = seq(100, 150, by= 50), function(x)  sapply(rep(x, 10), sim))
+l
+names(l) <- as.character(seq(100, 1000, by= 50))
+l
+lapply(l, function(x) apply(x, 1, mean)) %>% unlist()
+```
+
+# Aquií finaliza el borrador
+#------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------
+
+
+
+
+
+# función que ayudara a contruir los escenarios:
+
+```{r}
+sim2 <- function(n = 100, dis = 'igamma' ) {
+  if (dis == 'igamma') dis <- rIGAMMA(n = n, mu = exp(3.25690457), sigma = exp(-2.53285182)) 
+  else if(dis == 'norm') dis <- rnorm(n = n, mean = 26.29884, sd = 2.109061 )
+  else if(dis == 'rlnorm') dis <- rlnorm(n = n, meanlog = 3.266352269, sdlog = 0.079567159  )
+  else if(dis == 'rgamma') dis <- rgamma(n = n, shape = 155.4873439, rate = 5.9123269 )
+  else if(dis == 'norm_fake1') dis <- rnorm(n = n, mean = 20, sd = 2.109061 )
+  else if(dis == 'norm_fake2') dis <- rnorm(n = n, mean = 30, sd = 2.109061 )
+  else stop(print('Escriba bien haber!:  
+                  igamma, norm, rlnorm, rgamma, rgamma, norm_fake1, norm_fake2'))
+# genero datos
+  n <- n
+  samp_width <-  dis
+  prob_satellite <- predict(fit, newdata = data.frame(width = samp_width), type = 'response');
+  y <- rbinom(n = n, size = 1, prob = prob_satellite)
+  index <- sample(x = n, size = 0.5*n, replace = F)
+  datos_simulados <- data.frame(y, samp_width)
+  
+  # Para almacenar las Accuracy
+  Accurracy_mods <- numeric(3)
+  
+  # logistisco
+  mod_train <- glm(factor(y) ~ samp_width, family = binomial, data = datos_simulados[index,]) 
+  prob_sim <- predict(object = mod_train, newdata = datos_simulados[-index,], type = 'response')
+  prob_sim <- ifelse(prob_sim > 0.5, 1, 0)# umbral de 0.5
+  Accurracy_mods[1] <- mean(prob_sim == datos_simulados[-index,'y'])
+  
+  # árbol
+  mod_train_tree <- tree(factor(y) ~ samp_width, data = datos_simulados[index,]) 
+  prob_sim <- predict(object = mod_train_tree, newdata = datos_simulados[-index,], type = 'class')
+  Accurracy_mods[2] <- mean(prob_sim == datos_simulados[-index,'y'])
+  
+  # Boosting
+  mod_train_boost <- gbm(y ~ samp_width, data = datos_simulados[index, ], distribution = 'adaboost', 
+                        n.trees = 5000, interaction.depth = 5) 
+  prob_sim <- predict(object = mod_train_boost, newdata = datos_simulados[-index,], n.trees = 5000, type = 'response')
+  prob_sim <- ifelse(prob_sim > 0.5, 1, 0)# umbral de 0.5
+  Accurracy_mods[3] <- mean(prob_sim == datos_simulados[-index,'y'])
+  
+  return(Accurracy_mods)
+    
+}
+```
+
+
+
+
+# Escenarios, ojo 45 min aprox por cada escenario:
+```{r}
+tiempos_datos <- numeric(6)
+inicio <- Sys.time()
+list_igamma <- lapply(X = seq(100, 2000, by = 50), function(x)  sapply(rep(x, 100), sim2, dis ='igamma'))
+fin <- Sys.time()
+tiempos_datos[1] <- inicio-fin
+
+inicio <- Sys.time()
+list_norm <- lapply(X = seq(100, 2000, by = 50), function(x)  sapply(rep(x, 100), sim2, dis ='norm'))
+fin <- Sys.time()
+tiempos_datos[2] <- inicio-fin
+
+inicio <- Sys.time()
+list_rlnorm<- lapply(X = seq(100, 2000, by = 50), function(x)  sapply(rep(x, 100), sim2, dis ='rlnorm'))
+fin <- Sys.time()
+tiempos_datos[3] <- inicio-fin
+
+inicio <- Sys.time()
+list_rgamma <- lapply(X = seq(100, 2000, by = 50), function(x)  sapply(rep(x, 100), sim2, dis ='rgamma'))
+fin <- Sys.time()
+tiempos_datos[4] <- inicio-fin
+
+# inicio <- Sys.time()
+# list_fake1 <- lapply(X = seq(100, 2000, by = 50), function(x)  sapply(rep(x, 100), sim2, dis ='norm_fake1'))
+# fin <- Sys.time()
+# tiempos_datos[5] <- inicio-fin
+# 
+# inicio <- Sys.time()
+# list_fake2 <- lapply(X = seq(100, 2000, by = 50), function(x)  sapply(rep(x, 100), sim2, dis ='norm_fake2'))
+# fin <- Sys.time()
+# tiempos_datos[6] <- inicio-fin
+```
+
+
+# Guardo los objetos
+```{r}
+install.packages("beepr")
+
+# Util para saber cuando termina :) un algoritmo, sobretodo el 8
+library(beepr)
+
+saveRDS(list_igamma, file = "list_igamma1.rds")
+saveRDS(list_norm, file = "list_norm.rds")
+saveRDS(list_rlnorm, file = "list_rlnorm.rds")
+saveRDS(list_rgamma, file = "list_rgamma.rds")
+# Restore the object
+list_norm <-  readRDS(file = "list_norm.rds")
+list_igamma <-  readRDS(file = "list_igamma1.rds")
+list_rlnorm <-  readRDS(file = "list_rlnorm.rds")
+list_rgamma <-  readRDS(file = "list_rgamma.rds")
+
+# Otra forma de guardar la info:
+# save(list_igamma1, list_igamma2, list_igamma3, file = "data.RData")
+# rm(list_igamma1, list_igamma2, list_igamma3)
+# load("data.RData")
+
+```
+
+
+#### Escenario 1: los width(Ancho caparazon) proviene de una gamma inversa con parámetros  mu =  exp(3.25690457) y sigma = exp(-2.53285182)))))
+```{r}
+resultado1 <- data.frame(logistico =lapply(list_igamma, rowMeans) %>% sapply(.,"[[",1),
+           arbol =lapply(list_igamma, rowMeans) %>% sapply(.,"[[",2),
+           Boosting =lapply(list_igamma, rowMeans) %>% sapply(.,"[[",3),
+           n = seq(100, 2000, by = 50)
+           ) 
+resultado1 <- pivot_longer(data = resultado1 ,cols = -n ,names_to = 'names', values_to = 'values' )
+
+ggplot(data = resultado1, mapping = aes(x = n, y = values, fill = names, col =  names), )+
+  geom_line(lwd =2)+
+  geom_point(lwd = 3.5)+
+  labs(y = 'Accurracy', x = 'Tamaño de muestra', title = 'Escenario 1, desempeño del modelo en su presicion')+
+  theme_minimal();
+beep(2)
+```
+
+
+
+#### escenario 2 rnorm(n = 10000, mean = 26.29884, sd = 2.109061 )
+```{r}
+resultado2 <- data.frame(logistico =lapply(list_norm, rowMeans) %>% sapply(.,"[[",1),
+           arbol =lapply(list_norm, rowMeans) %>% sapply(.,"[[",2),
+           Boosting =lapply(list_norm, rowMeans) %>% sapply(.,"[[",3),
+           n = seq(100, 2000, by = 50)
+           ) 
+resultado2 <- pivot_longer(data = resultado2,cols = -n ,names_to = 'names', values_to = 'values' )
+
+ggplot(data = resultado2, mapping = aes(x = n, y = values, fill = names, col =  names), )+
+  geom_line(lwd =2)+
+  geom_point(lwd = 3.5)+
+  labs(y = 'Accurracy', x = 'Tamaño de muestra', title = 'Escenario 2, desempeño del modelo en su presicion')+
+  theme_minimal()
+beep(3)
+```
+
+
+#### escenario 3 rlnorm(n = n, meanlog = 3.266352269, sdlog = 0.079567159  )
+
+```{r}
+resultado3 <- data.frame(logistico =lapply(list_rlnorm, rowMeans) %>% sapply(.,"[[",1),
+           arbol =lapply(list_rlnorm, rowMeans) %>% sapply(.,"[[",2),
+           Boosting =lapply(list_rlnorm, rowMeans) %>% sapply(.,"[[",3),
+           n = seq(100, 2000, by = 50)
+           ) 
+resultado3 <- pivot_longer(data = resultado3,cols = -n ,names_to = 'names', values_to = 'values')  
+
+  ggplot(data = resultado3, mapping = aes(x = n, y = values, fill = names, col =  names), )+
+  geom_line(lwd =2)+
+  geom_point(lwd = 3.5)+
+  labs(y = 'Accurracy', x = 'Tamaño de muestra', title = 'Escenario 3, desempeño del modelo en su presicion')+
+  theme_minimal()
+  beep(8)
+```
+ 
+
+
+#### escenario 4 rgamma(n = n, shape = 155.4873439, rate = 5.9123269 )
+
+```{r}
+resultado4 <- data.frame(logistico =lapply(list_rgamma, rowMeans) %>% sapply(.,"[[",1),
+           arbol =lapply(list_rgamma, rowMeans) %>% sapply(.,"[[",2),
+           Boosting =lapply(list_rgamma, rowMeans) %>% sapply(.,"[[",3),
+           n = seq(100, 2000, by = 50)
+           ) 
+resultado4 <- pivot_longer(data = resultado4,cols = -n ,names_to = 'names', values_to = 'values' )
+
+ggplot(data = resultado4, mapping = aes(x = n, y = values, fill = names, col =  names), )+
+  geom_line(lwd =2)+
+  geom_point(lwd = 3.5)+
+  labs(y = 'Accurracy', x = 'Tamaño de muestra', title = 'Escenario 4, desempeño del modelo en su presicion')+
+  theme_minimal()
+ beep(1)
+```
+
+#### escenario 5 rnorm(n = n, mean = 30, sd = 2.109061 ) --> inapropiada
+```{r}
+resultado2 <- sapply(X = seq(100, 2000, by = 50), FUN =  function(x) sim2(n = x, dis ='norm_fake1'))
+resultado2 <- t(resultado2) %>% as_tibble()
+names(resultado2) <- c('logistico', 'Arbol', 'Boosting')
+resultado2$n <- seq(100, 2000, by = 50)
+resultado2 <- pivot_longer(data = resultado2,cols = -n ,names_to = 'names', values_to = 'values' )
+
+ggplot(data = resultado2, mapping = aes(x = n, y = values, fill = names, col =  names), )+
+  geom_line( size = 1, alpha = 2)+
+  geom_point()+
+  labs(y = 'Accurracy', x = 'Tamaño de muestra', title = 'Escenario 5, desempeño del modelo en su presicion')+
+  theme_minimal()
+```
+
+
+#### escenario 6  rnorm(n = n, mean = 30, sd = 2.109061 ) -> inapropiada
+```{r}
+resultado2 <- sapply(X = seq(100, 2000, by = 50), FUN =  function(x) sim2(n = x, dis ='norm_fake2'))
+resultado2 <- t(resultado2) %>% as_tibble()
+names(resultado2) <- c('logistico', 'Arbol', 'Boosting')
+resultado2$n <- seq(100, 2000, by = 50)
+resultado2 <- pivot_longer(data = resultado2,cols = -n ,names_to = 'names', values_to = 'values' )
+
+ggplot(data = resultado2, mapping = aes(x = n, y = values, fill = names, col =  names), )+
+  geom_line()+
+  geom_point()+
+  labs(y = 'Accurracy', x = 'Tamaño de muestra', title = 'Escenario 6, desempeño del modelo en su presicion')+
+  theme_minimal()
+```
+
+
+
+# En este chunk evaluo el comportamiento de distribuciones inapropiadas:
+```{r, eval=F}
+n <- 200
+# samp_width <- drnorm(n = n, mean = 26.29884, sd = 2.109061) 
+samp_width <- rnorm(n = n, mean = 10, sd = 2.109061 ) # para distribuciones falsas
+prob_satellite <- predict(fit, newdata = data.frame(width = samp_width), type = 'response');
+y <- rbinom(n = n, size = 1, prob = prob_satellite)
+index <- sample(x = n, size = 0.7*n, replace = F)
+datos_simulados <- data.frame(y, samp_width)
+
+
+mod_train <- glm(factor(y) ~ samp_width, family = binomial, data = datos_simulados[index,]) ; 
+prob_sim <- predict(object = mod_train, newdata = datos_simulados[-index,], type = 'response')
+prob_sim <- predict(object = mod_train, newdata = datos_simulados[-index,], type = 'response')
+estim <- ifelse(prob_sim > 0.5, 1, 0)# umbral de 0.5
+mean(estim == datos_simulados[-index,'y'])
+
+# arbol de clasificación
+mod_train_tree <- tree(factor(y) ~ samp_width, data = datos_simulados[index,]) 
+prob_sim <- predict(object = mod_train_tree, newdata = datos_simulados[-index,], type = 'class')
+mean(prob_sim == datos_simulados[-index,'y'])
+
+# Modelo de ensamble boosting
+mod_train_boost <- gbm(y ~ samp_width, data = datos_simulados[index, ], distribution = 'adaboost', 
+                      n.trees = 5000, interaction.depth = 5) 
+prob_sim <- predict(object = mod_train_boost, newdata = datos_simulados[-index,], n.trees = 5000, type = 'response')
+prob_sim <- ifelse(prob_sim > 0.5, 1, 0)# umbral de 0.5
+mean(prob_sim == datos_simulados[-index,'y'])
+```
+
+
+# no olvidar usar
+```{r}
+write.table(append = T)
+a <- try(expr = lm(), silent = T)
+```
+
